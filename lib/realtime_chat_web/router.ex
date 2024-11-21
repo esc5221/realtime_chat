@@ -8,6 +8,7 @@ defmodule RealtimeChatWeb.Router do
     plug :put_root_layout, html: {RealtimeChatWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
+    plug RealtimeChatWeb.Plugs.UsernamePlug
   end
 
   pipeline :api do

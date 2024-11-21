@@ -4,13 +4,24 @@ defmodule RealtimeChatWeb.ChatLive do
   alias RealtimeChat.Repo
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(RealtimeChat.PubSub, "chat")
     end
 
     messages = Repo.all(Message) |> Enum.reverse()
-    {:ok, assign(socket, messages: messages, message: "", username: "guest_#{:rand.uniform(1000)}")}
+    username = session["username"] || generate_username()
+    socket = assign(socket, messages: messages, message: "", username: username)
+
+    if connected?(socket) do
+      {:ok, socket, temporary_assigns: [messages: []]}
+    else
+      {:ok, socket}
+    end
+  end
+
+  defp generate_username do
+    "guest_#{:rand.uniform(1000)}"
   end
 
   @impl true
