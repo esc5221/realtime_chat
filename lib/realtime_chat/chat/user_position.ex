@@ -9,14 +9,15 @@ defmodule RealtimeChat.Chat.UserPosition do
     field :messages, {:array, :map}, default: []
     field :connected, :boolean, default: true
     field :current_message, :string, default: ""
+    field :user_id, :string
 
     timestamps()
   end
 
   def changeset(user_position, attrs) do
     user_position
-    |> cast(attrs, [:username, :x, :y, :messages, :connected, :current_message])
-    |> validate_required([:username, :x, :y])
+    |> cast(attrs, [:username, :x, :y, :messages, :connected, :current_message, :user_id])
+    |> validate_required([:username, :x, :y, :user_id])
   end
 
   def find_optimal_position(existing_positions) do

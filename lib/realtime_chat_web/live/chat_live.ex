@@ -5,25 +5,25 @@ defmodule RealtimeChatWeb.ChatLive do
   import Ecto.Query, except: [update: 2, update: 3]
 
   @impl true
-  def mount(_params, %{"username" => username}, socket) do
+  def mount(_params, %{"username" => username, "user_id" => user_id}, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(RealtimeChat.PubSub, "chat")
 
       # 기존 사용자 위치 가져오기
-      user_position = case Repo.get_by(UserPosition, username: username) do
+      user_position = case Repo.get_by(UserPosition, user_id: user_id) do
         nil ->
           # 새 사용자인 경우에만 최적의 위치 찾기
           existing_positions = from(p in UserPosition, where: p.connected == true)
                              |> Repo.all()
           {x, y} = UserPosition.find_optimal_position(existing_positions)
           
-          %UserPosition{username: username, x: x, y: y}
+          %UserPosition{username: username, user_id: user_id, x: x, y: y}
           |> Repo.insert!()
           
         existing ->
           # 기존 사용자는 위치 유지하고 connected만 true로
           existing
-          |> Ecto.Changeset.change(connected: true)
+          |> Ecto.Changeset.change(connected: true, username: username)
           |> Repo.update!()
       end
 
@@ -33,6 +33,7 @@ defmodule RealtimeChatWeb.ChatLive do
 
     socket = socket
              |> assign(:username, username)
+             |> assign(:user_id, user_id)
              |> assign(:message, "")
              |> assign(:dragging, false)
              |> assign(:show_username_modal, false)
@@ -44,7 +45,7 @@ defmodule RealtimeChatWeb.ChatLive do
   @impl true
   def handle_event("send", %{"message" => message}, socket) do
     username = socket.assigns.username
-    user_position = Repo.get_by!(UserPosition, username: username)
+    user_position = Repo.get_by!(UserPosition, user_id: socket.assigns.user_id)
     
     # 메시지 추가
     new_message = %{
@@ -67,7 +68,7 @@ defmodule RealtimeChatWeb.ChatLive do
   @impl true
   def handle_event("typing", %{"value" => message}, socket) do
     username = socket.assigns.username
-    user_position = Repo.get_by!(UserPosition, username: username)
+    user_position = Repo.get_by!(UserPosition, user_id: socket.assigns.user_id)
     
     # 현재 메시지 업데이트 (임시)
     user_position
@@ -83,7 +84,7 @@ defmodule RealtimeChatWeb.ChatLive do
   @impl true
   def handle_event("keydown", %{"key" => "Enter", "value" => message}, socket) when message != "" do
     username = socket.assigns.username
-    user_position = Repo.get_by!(UserPosition, username: username)
+    user_position = Repo.get_by!(UserPosition, user_id: socket.assigns.user_id)
     
     # 메시지를 히스토리에 추가
     new_message = %{
@@ -108,7 +109,7 @@ defmodule RealtimeChatWeb.ChatLive do
   @impl true
   def handle_event("save_message", %{"message" => message}, socket) do
     username = socket.assigns.username
-    user_position = Repo.get_by!(UserPosition, username: username)
+    user_position = Repo.get_by!(UserPosition, user_id: socket.assigns.user_id)
     
     # 메시지를 히스토리에 추가
     new_message = %{
@@ -143,7 +144,7 @@ defmodule RealtimeChatWeb.ChatLive do
     username = socket.assigns.username
 
     # 위치 업데이트
-    user_position = Repo.get_by!(UserPosition, username: username)
+    user_position = Repo.get_by!(UserPosition, user_id: socket.assigns.user_id)
     user_position
     |> Ecto.Changeset.change(x: x, y: y)
     |> Repo.update!()
@@ -161,8 +162,8 @@ defmodule RealtimeChatWeb.ChatLive do
 
   @impl true
   def handle_event("change_username", %{"username" => new_username}, socket) do
-    old_username = socket.assigns.username
-    user_position = Repo.get_by!(UserPosition, username: old_username)
+    user_id = socket.assigns.user_id
+    user_position = Repo.get_by!(UserPosition, user_id: user_id)
 
     case Repo.get_by(UserPosition, username: new_username) do
       nil ->
@@ -172,7 +173,7 @@ defmodule RealtimeChatWeb.ChatLive do
         |> Repo.update!()
 
         # Broadcast the change
-        Phoenix.PubSub.broadcast(RealtimeChat.PubSub, "chat", {:username_changed, old_username, new_username})
+        Phoenix.PubSub.broadcast(RealtimeChat.PubSub, "chat", {:username_changed, user_position.username, new_username})
 
         {:noreply,
          socket
