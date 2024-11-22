@@ -10,20 +10,20 @@ defmodule RealtimeChatWeb.ChatLive do
       Phoenix.PubSub.subscribe(RealtimeChat.PubSub, "chat")
 
       # 기존 사용자 위치 가져오기
-      existing_positions = from(p in UserPosition, where: p.connected == true)
-                         |> Repo.all()
-
-      # 최적의 새 위치 찾기
-      {x, y} = UserPosition.find_optimal_position(existing_positions)
-
-      # 새 사용자 위치 저장 또는 업데이트
       user_position = case Repo.get_by(UserPosition, username: username) do
         nil ->
+          # 새 사용자인 경우에만 최적의 위치 찾기
+          existing_positions = from(p in UserPosition, where: p.connected == true)
+                             |> Repo.all()
+          {x, y} = UserPosition.find_optimal_position(existing_positions)
+          
           %UserPosition{username: username, x: x, y: y}
           |> Repo.insert!()
+          
         existing ->
+          # 기존 사용자는 위치 유지하고 connected만 true로
           existing
-          |> Ecto.Changeset.change(connected: true, x: x, y: y)
+          |> Ecto.Changeset.change(connected: true)
           |> Repo.update!()
       end
 
