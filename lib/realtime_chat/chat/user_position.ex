@@ -23,7 +23,7 @@ defmodule RealtimeChat.Chat.UserPosition do
     |> validate_required([:username, :x, :y, :user_id])
   end
 
-  def inactive_timeout, do: 5 * 60 # 5 minutes in seconds
+  def inactive_timeout, do: 24 * 60 * 60  # 1일
 
   def active?(user_position) do
     case user_position.last_active do
@@ -34,6 +34,21 @@ defmodule RealtimeChat.Chat.UserPosition do
     end
   end
 
+  def get_opacity(user_position) do
+    case user_position.last_active do
+      nil -> 0.2
+      last_active ->
+        diff = DateTime.diff(DateTime.utc_now(), last_active)
+        cond do
+          diff < 5 * 60 -> 1.0        # 5분 이내: 100%
+          diff < 30 * 60 -> 0.8       # 30분 이내: 80%
+          diff < 3 * 60 * 60 -> 0.5   # 3시간 이내: 60%
+          diff < inactive_timeout() -> 0.2  # 24시간 이내: 20%
+          true -> 0.0
+        end
+    end
+  end
+
   def update_last_active(user_position) do
     user_position
     |> changeset(%{last_active: DateTime.utc_now() |> DateTime.truncate(:second)})
@@ -41,7 +56,7 @@ defmodule RealtimeChat.Chat.UserPosition do
 
   def get_active_users(query \\ __MODULE__) do
     timeout = DateTime.utc_now() |> DateTime.add(-inactive_timeout(), :second)
-    
+
     from u in query,
       where: u.connected == true and u.last_active > ^timeout
   end

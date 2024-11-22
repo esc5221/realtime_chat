@@ -355,7 +355,7 @@ defmodule RealtimeChatWeb.ChatLive do
           <%= for position <- @user_positions do %>
             <div class={"user-chat-box fixed select-none" <> if(position.username == @username, do: " current-user cursor-grab", else: "")} 
                  id={"chat-#{position.user_id}"}
-                 style={"transform: translate3d(#{position.x}px, #{position.y}px, 0)"}
+                 style={"transform: translate3d(#{position.x}px, #{position.y}px, 0); opacity: #{UserPosition.get_opacity(position)}"}
                  data-draggable={if position.user_id == @user_id, do: "true", else: "false"}
                  phx-hook="Draggable">
               <div class="bg-white rounded-lg shadow-lg p-4 w-48">
