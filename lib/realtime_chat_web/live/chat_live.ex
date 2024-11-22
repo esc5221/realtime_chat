@@ -87,7 +87,7 @@ defmodule RealtimeChatWeb.ChatLive do
   end
 
   @impl true
-  def handle_event("typing", %{"value" => message}, socket) when byte_size(message) <= @message_max_length do
+  def handle_event("typing", %{"value" => message}, socket) when byte_size(message) <= 200 do
     user_position = Repo.get_by!(UserPosition, user_id: socket.assigns.user_id)
     
     user_position
@@ -194,39 +194,45 @@ defmodule RealtimeChatWeb.ChatLive do
   end
 
   @impl true
-  def handle_event("change_username", %{"username" => new_username}, socket) do
+  def handle_event("change_username", %{"username" => username}, socket) when byte_size(username) <= 20 do
     user_id = socket.assigns.user_id
     old_username = socket.assigns.username
     user_position = Repo.get_by!(UserPosition, user_id: user_id)
 
-    case Repo.get_by(UserPosition, username: new_username) do
-      nil ->
+    case String.trim(username) do
+      "" ->
+        {:noreply, 
+          socket 
+          |> put_flash(:error, "Username cannot be empty")}
+      
+      username ->
         # Update the username in user_position
-        {:ok, updated_position} =
+        {:ok, updated_position} = 
           user_position
-          |> Ecto.Changeset.change(username: new_username)
+          |> Ecto.Changeset.change(username: username)
           |> Repo.update()
 
-        # Update local state first
-        socket =
+        # Broadcast the change
+        Phoenix.PubSub.broadcast(
+          RealtimeChat.PubSub,
+          "chat",
+          {:username_changed, old_username, username}
+        )
+
+        {:noreply,
           socket
-          |> assign(:username, new_username)
-          |> assign(:show_username_modal, false)
+          |> assign(:username, username)
           |> assign(:user_positions, Enum.map(socket.assigns.user_positions, fn pos ->
             if pos.user_id == user_id, do: updated_position, else: pos
           end))
-
-        # Broadcast the change to other clients
-        Phoenix.PubSub.broadcast(RealtimeChat.PubSub, "chat", {:username_changed, old_username, new_username})
-
-        {:noreply, socket}
-
-      _ ->
-        {:noreply,
-         socket
-         |> put_flash(:error, "Username already taken")
-         |> assign(:show_username_modal, true)}
+          |> assign(:show_username_modal, false)}
     end
+  end
+
+  def handle_event("change_username", _params, socket) do
+    {:noreply, 
+      socket 
+      |> put_flash(:error, "Username is too long (maximum is 20 characters)")}
   end
 
   @impl true
@@ -257,6 +263,19 @@ defmodule RealtimeChatWeb.ChatLive do
   @impl true
   def handle_info({:new_message, _username}, socket) do
     {:noreply, assign(socket, :user_positions, UserPosition.get_active_users() |> Repo.all() |> Enum.uniq_by(& &1.user_id))}
+  end
+
+  @impl true
+  def handle_info({:user_typing, user_id, message}, socket) do
+    updated_positions = Enum.map(socket.assigns.user_positions, fn pos ->
+      if pos.user_id == user_id do
+        %{pos | current_message: message}
+      else
+        pos
+      end
+    end)
+    
+    {:noreply, assign(socket, :user_positions, updated_positions)}
   end
 
   @impl true
@@ -301,10 +320,12 @@ defmodule RealtimeChatWeb.ChatLive do
   end
 
   @message_max_length 200
+  @username_max_length 20
 
   @impl true
   def render(assigns) do
     assigns = assign(assigns, :message_max_length, @message_max_length)
+    assigns = assign(assigns, :username_max_length, @username_max_length)
     ~H"""
     <div class="fixed inset-0 flex flex-col bg-gray-100">
       <div class="flex-none h-16 bg-white shadow-sm px-4 flex items-center justify-between">
@@ -328,10 +349,17 @@ defmodule RealtimeChatWeb.ChatLive do
             <form phx-submit="change_username" class="space-y-4">
               <div>
                 <label class="block text-sm font-medium text-gray-700">New Username</label>
-                <input type="text" name="username" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
-                       value={@username}
-                       required
-                       autocomplete="off"/>
+                <div class="relative">
+                  <input type="text" name="username" 
+                         class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                         value={@username}
+                         maxlength={@username_max_length}
+                         required
+                         autocomplete="off"/>
+                  <div class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">
+                    <%= String.length(@username) %>/<%= @username_max_length %>
+                  </div>
+                </div>
               </div>
               <%= if Phoenix.Flash.get(@flash, :error) do %>
                 <p class="text-sm text-red-600"><%= Phoenix.Flash.get(@flash, :error) %></p>
@@ -363,7 +391,10 @@ defmodule RealtimeChatWeb.ChatLive do
                  data-draggable={if position.user_id == @user_id, do: "true", else: "false"}
                  phx-hook="Draggable">
               <div class="bg-white rounded-lg shadow-lg p-4 w-48">
-                <div class="font-bold text-gray-700 mb-2"><%= position.username %></div>
+                <div class="font-bold text-gray-700 mb-2 flex items-center justify-between">
+                  <span><%= position.username %></span>
+                  <span class={"w-2 h-2 rounded-full " <> if(position.connected, do: "bg-green-500", else: "bg-gray-300")}></span>
+                </div>
                 <div class="current-message text-gray-600 min-h-[1.5rem] max-h-[4.5rem] overflow-y-auto break-words">
                   <%= position.current_message %>
                 </div>
