@@ -9,51 +9,66 @@ defmodule RealtimeChatWeb.ChatLive do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(RealtimeChat.PubSub, "chat")
 
-      # 기존 사용자 위치 가져오기
-      user_position = case Repo.get_by(UserPosition, user_id: user_id) do
-        nil ->
-          # 새 사용자인 경우에만 최적의 위치 찾기
-          existing_positions = from(p in UserPosition, where: p.connected == true)
-                             |> Repo.all()
-          {x, y} = UserPosition.find_optimal_position(existing_positions)
-          
-          %UserPosition{username: username, user_id: user_id, x: x, y: y}
-          |> Repo.insert!()
-          
-        existing ->
-          # 기존 사용자는 위치 유지하고 connected만 true로
-          existing
-          |> Ecto.Changeset.change(connected: true, username: username)
-          |> Repo.update!()
-      end
+      # 기존 사용자 목록 가져오기
+      user_positions = 
+        get_connected_users()
+        |> Enum.uniq_by(& &1.user_id)  # 중복 제거
 
-      # 다른 사용자들에게 새 사용자 입장을 알림
+      # 새 사용자의 position 생성 또는 업데이트
+      user_position =
+        case Repo.get_by(UserPosition, user_id: user_id) do
+          nil ->
+            %UserPosition{
+              username: username,
+              user_id: user_id,
+              x: 600,
+              y: 400,
+              connected: true,
+              messages: []
+            }
+            |> Repo.insert!()
+
+          existing ->
+            existing
+            |> Ecto.Changeset.change(connected: true)
+            |> Repo.update!()
+        end
+
+      # 다른 클라이언트들에게 알림
       Phoenix.PubSub.broadcast(RealtimeChat.PubSub, "chat", {:user_joined, user_position})
+
+      {:ok,
+       socket
+       |> assign(:user_positions, Enum.uniq_by([user_position | user_positions], & &1.user_id))
+       |> assign(:username, username)
+       |> assign(:user_id, user_id)
+       |> assign(:message, "")
+       |> assign(:show_username_modal, false)
+       |> assign(:dragging, false)}
+    else
+      {:ok,
+       socket
+       |> assign(:username, username)
+       |> assign(:user_id, user_id)
+       |> assign(:message, "")
+       |> assign(:show_username_modal, false)
+       |> assign(:dragging, false)
+       |> assign(:user_positions, [])}
     end
-
-    socket = socket
-             |> assign(:username, username)
-             |> assign(:user_id, user_id)
-             |> assign(:message, "")
-             |> assign(:dragging, false)
-             |> assign(:show_username_modal, false)
-             |> assign(:user_positions, get_connected_users())
-
-    {:ok, socket}
   end
 
   @impl true
   def handle_event("send", %{"message" => message}, socket) do
     username = socket.assigns.username
     user_position = Repo.get_by!(UserPosition, user_id: socket.assigns.user_id)
-    
+
     # 메시지 추가
     new_message = %{
       content: message,
       timestamp: DateTime.utc_now() |> DateTime.to_string()
     }
     messages = [new_message | user_position.messages]
-    
+
     # 사용자 위치 업데이트
     user_position
     |> Ecto.Changeset.change(messages: messages)
@@ -69,7 +84,7 @@ defmodule RealtimeChatWeb.ChatLive do
   def handle_event("typing", %{"value" => message}, socket) do
     username = socket.assigns.username
     user_position = Repo.get_by!(UserPosition, user_id: socket.assigns.user_id)
-    
+
     # 현재 메시지 업데이트 (임시)
     user_position
     |> Ecto.Changeset.change(current_message: message)
@@ -85,14 +100,14 @@ defmodule RealtimeChatWeb.ChatLive do
   def handle_event("keydown", %{"key" => "Enter", "value" => message}, socket) when message != "" do
     username = socket.assigns.username
     user_position = Repo.get_by!(UserPosition, user_id: socket.assigns.user_id)
-    
+
     # 메시지를 히스토리에 추가
     new_message = %{
       "content" => message,
       "timestamp" => DateTime.utc_now() |> DateTime.to_string()
     }
     messages = [new_message | user_position.messages]
-    
+
     # 사용자 위치 업데이트
     user_position
     |> Ecto.Changeset.change(messages: messages, current_message: "")
@@ -110,14 +125,14 @@ defmodule RealtimeChatWeb.ChatLive do
   def handle_event("save_message", %{"message" => message}, socket) do
     username = socket.assigns.username
     user_position = Repo.get_by!(UserPosition, user_id: socket.assigns.user_id)
-    
+
     # 메시지를 히스토리에 추가
     new_message = %{
       content: message,
       timestamp: DateTime.utc_now() |> DateTime.to_string()
     }
     messages = [new_message | user_position.messages]
-    
+
     # 사용자 위치 업데이트
     user_position
     |> Ecto.Changeset.change(messages: messages, current_message: "")
@@ -141,18 +156,28 @@ defmodule RealtimeChatWeb.ChatLive do
 
   @impl true
   def handle_event("update_position", %{"x" => x, "y" => y}, socket) do
-    username = socket.assigns.username
+    user_id = socket.assigns.user_id
 
     # 위치 업데이트
-    user_position = Repo.get_by!(UserPosition, user_id: socket.assigns.user_id)
-    user_position
-    |> Ecto.Changeset.change(x: x, y: y)
-    |> Repo.update!()
+    user_position = Repo.get_by!(UserPosition, user_id: user_id)
+
+    {:ok, updated_position} =
+      user_position
+      |> Ecto.Changeset.change(%{x: x, y: y})
+      |> Repo.update()
 
     # 브로드캐스트
-    Phoenix.PubSub.broadcast(RealtimeChat.PubSub, "chat", {:position_updated, username, x, y})
+    Phoenix.PubSub.broadcast(RealtimeChat.PubSub, "chat", {:position_updated, user_id, x, y})
 
-    {:noreply, socket}
+    {:noreply,
+      socket
+      |> assign(:user_positions, 
+        socket.assigns.user_positions
+        |> Enum.uniq_by(& &1.user_id)  # 중복 제거
+        |> Enum.map(fn pos ->
+          if pos.user_id == user_id, do: updated_position, else: pos
+        end)
+      )}
   end
 
   @impl true
@@ -212,7 +237,13 @@ defmodule RealtimeChatWeb.ChatLive do
 
   @impl true
   def handle_info({:user_joined, user_position}, socket) do
-    {:noreply, Phoenix.Component.update(socket, :user_positions, &[user_position | &1])}
+    updated_positions =
+      socket.assigns.user_positions
+      |> Enum.reject(& &1.user_id == user_position.user_id)  # 기존 position 제거
+      |> Enum.concat([user_position])  # 새 position 추가
+      |> Enum.uniq_by(& &1.user_id)  # 안전을 위한 중복 제거
+
+    {:noreply, assign(socket, :user_positions, updated_positions)}
   end
 
   @impl true
@@ -230,12 +261,16 @@ defmodule RealtimeChatWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:position_updated, username, x, y}, socket) do
-    {:noreply, Phoenix.Component.update(socket, :user_positions, fn positions ->
-      Enum.map(positions, fn pos ->
-        if pos.username == username, do: %{pos | x: x, y: y}, else: pos
-      end)
-    end)}
+  def handle_info({:position_updated, user_id, x, y}, socket) do
+    {:noreply, 
+      socket
+      |> assign(:user_positions, 
+        socket.assigns.user_positions
+        |> Enum.uniq_by(& &1.user_id)  # 중복 제거
+        |> Enum.map(fn pos ->
+          if pos.user_id == user_id, do: %{pos | x: x, y: y}, else: pos
+        end)
+      )}
   end
 
   defp get_connected_users do
@@ -293,14 +328,14 @@ defmodule RealtimeChatWeb.ChatLive do
       <% end %>
 
       <div class="flex-1 relative overflow-hidden">
-        <div class="absolute inset-0 p-4" 
+        <div class="absolute inset-0 p-4 canvas-container"
              id="chat-canvas"
              phx-hook="ChatCanvas">
           <%= for position <- @user_positions do %>
-            <div class={"user-chat-box" <> if(position.username == @username, do: " current-user", else: "")} 
-                 id={"user-#{position.username}"}
-                 style={"left: #{position.x}px; top: #{position.y}px"}
-                 data-draggable={"#{position.username == @username}"}
+            <div class={"user-chat-box fixed select-none" <> if(position.username == @username, do: " current-user cursor-grab", else: "")} 
+                 id={"chat-#{position.user_id}"}
+                 style={"transform: translate3d(#{position.x}px, #{position.y}px, 0)"}
+                 data-draggable={if position.user_id == @user_id, do: "true", else: "false"}
                  phx-hook="Draggable">
               <div class="bg-white rounded-lg shadow-lg p-4 w-48">
                 <div class="font-bold text-gray-700 mb-2"><%= position.username %></div>
@@ -324,7 +359,7 @@ defmodule RealtimeChatWeb.ChatLive do
 
       <div class="flex-none h-24 bg-white shadow-lg px-4 flex items-center justify-center">
         <div class="w-full max-w-2xl">
-          <input type="text" 
+          <input type="text"
                  value={@message}
                  phx-keyup="typing"
                  phx-keydown="keydown"
