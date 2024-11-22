@@ -66,6 +66,70 @@ defmodule RealtimeChatWeb.ChatLive do
   end
 
   @impl true
+  def handle_event("typing", %{"value" => message}, socket) do
+    username = socket.assigns.username
+    user_position = Repo.get_by!(UserPosition, username: username)
+    
+    # 현재 메시지 업데이트 (임시)
+    user_position
+    |> Ecto.Changeset.change(current_message: message)
+    |> Repo.update!()
+
+    # 브로드캐스트
+    Phoenix.PubSub.broadcast(RealtimeChat.PubSub, "chat", {:typing, username, message})
+
+    {:noreply, assign(socket, :message, message)}
+  end
+
+  @impl true
+  def handle_event("keydown", %{"key" => "Enter", "value" => message}, socket) when message != "" do
+    username = socket.assigns.username
+    user_position = Repo.get_by!(UserPosition, username: username)
+    
+    # 메시지를 히스토리에 추가
+    new_message = %{
+      "content" => message,
+      "timestamp" => DateTime.utc_now() |> DateTime.to_string()
+    }
+    messages = [new_message | user_position.messages]
+    
+    # 사용자 위치 업데이트
+    user_position
+    |> Ecto.Changeset.change(messages: messages, current_message: "")
+    |> Repo.update!()
+
+    # 브로드캐스트
+    Phoenix.PubSub.broadcast(RealtimeChat.PubSub, "chat", {:new_message, username})
+
+    {:noreply, assign(socket, :message, "")}
+  end
+
+  def handle_event("keydown", _params, socket), do: {:noreply, socket}
+
+  @impl true
+  def handle_event("save_message", %{"message" => message}, socket) do
+    username = socket.assigns.username
+    user_position = Repo.get_by!(UserPosition, username: username)
+    
+    # 메시지를 히스토리에 추가
+    new_message = %{
+      content: message,
+      timestamp: DateTime.utc_now() |> DateTime.to_string()
+    }
+    messages = [new_message | user_position.messages]
+    
+    # 사용자 위치 업데이트
+    user_position
+    |> Ecto.Changeset.change(messages: messages, current_message: "")
+    |> Repo.update!()
+
+    # 브로드캐스트
+    Phoenix.PubSub.broadcast(RealtimeChat.PubSub, "chat", {:new_message, username})
+
+    {:noreply, assign(socket, :message, "")}
+  end
+
+  @impl true
   def handle_event("start_drag", _, socket) do
     {:noreply, assign(socket, :dragging, true)}
   end
@@ -102,6 +166,15 @@ defmodule RealtimeChatWeb.ChatLive do
   end
 
   @impl true
+  def handle_info({:typing, username, message}, socket) do
+    {:noreply, Phoenix.Component.update(socket, :user_positions, fn positions ->
+      Enum.map(positions, fn pos ->
+        if pos.username == username, do: %{pos | current_message: message}, else: pos
+      end)
+    end)}
+  end
+
+  @impl true
   def handle_info({:position_updated, username, x, y}, socket) do
     {:noreply, Phoenix.Component.update(socket, :user_positions, fn positions ->
       Enum.map(positions, fn pos ->
@@ -135,10 +208,10 @@ defmodule RealtimeChatWeb.ChatLive do
                  phx-hook="Draggable">
               <div class="bg-white rounded-lg shadow-lg p-4 w-48">
                 <div class="font-bold text-gray-700 mb-2"><%= position.username %></div>
+                <div class="current-message text-gray-600 min-h-[1.5rem]">
+                  <%= position.current_message %>
+                </div>
                 <%= if position.messages != [] do %>
-                  <div class="current-message text-gray-600">
-                    <%= get_in(hd(position.messages), ["content"]) %>
-                  </div>
                   <div class="message-history hidden absolute bottom-full left-0 w-full bg-white rounded-lg shadow-lg p-2 mb-2">
                     <%= for message <- Enum.take(position.messages, 5) do %>
                       <div class="text-sm text-gray-600 mb-1">
@@ -154,15 +227,15 @@ defmodule RealtimeChatWeb.ChatLive do
       </div>
 
       <div class="flex-none h-24 bg-white shadow-lg px-4 flex items-center justify-center">
-        <form phx-submit="send" class="w-full max-w-2xl flex gap-2">
-          <input type="text" name="message" value={@message} 
-                 class="flex-1 rounded-lg border border-gray-300 px-4 py-2"
+        <div class="w-full max-w-2xl">
+          <input type="text" 
+                 value={@message}
+                 phx-keyup="typing"
+                 phx-keydown="keydown"
+                 class="w-full rounded-lg border border-gray-300 px-4 py-2"
                  placeholder="Type your message..."
                  autocomplete="off"/>
-          <button type="submit" class="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 transition-colors">
-            Send
-          </button>
-        </form>
+        </div>
       </div>
     </div>
     """

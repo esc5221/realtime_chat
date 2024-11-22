@@ -8,13 +8,14 @@ defmodule RealtimeChat.Chat.UserPosition do
     field :y, :integer
     field :messages, {:array, :map}, default: []
     field :connected, :boolean, default: true
+    field :current_message, :string, default: ""
 
     timestamps()
   end
 
   def changeset(user_position, attrs) do
     user_position
-    |> cast(attrs, [:username, :x, :y, :messages, :connected])
+    |> cast(attrs, [:username, :x, :y, :messages, :connected, :current_message])
     |> validate_required([:username, :x, :y])
   end
 
