@@ -3,3 +3,28 @@
 @import "tailwindcss/utilities";
 
 /* This file is for your main application CSS */
+
+#chat-canvas {
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.user-chat-box {
+  position: absolute;
+  z-index: 10;
+  transition: all 0.2s ease;
+}
+
+.user-chat-box.current-user {
+  z-index: 20;
+}
+
+.message-history {
+  z-index: 30;
+}
+
+/* Remove default Phoenix styles */
+.phx-no-feedback.invalid-feedback,
+.phx-no-feedback .invalid-feedback {
+  display: none;
+}
