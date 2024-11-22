@@ -29,7 +29,7 @@ defmodule RealtimeChatWeb.ChatLive do
               y: 400,
               connected: true,
               messages: [],
-              last_active: DateTime.utc_now()
+              last_active: DateTime.utc_now() |> DateTime.truncate(:second)
             }
             |> Repo.insert!()
 

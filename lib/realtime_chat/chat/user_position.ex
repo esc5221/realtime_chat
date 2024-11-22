@@ -36,7 +36,7 @@ defmodule RealtimeChat.Chat.UserPosition do
 
   def update_last_active(user_position) do
     user_position
-    |> changeset(%{last_active: DateTime.utc_now()})
+    |> changeset(%{last_active: DateTime.utc_now() |> DateTime.truncate(:second)})
   end
 
   def get_active_users(query \\ __MODULE__) do
