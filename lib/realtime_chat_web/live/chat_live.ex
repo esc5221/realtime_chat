@@ -50,7 +50,8 @@ defmodule RealtimeChatWeb.ChatLive do
        |> assign(:user_id, user_id)
        |> assign(:message, "")
        |> assign(:show_username_modal, false)
-       |> assign(:dragging, false)}
+       |> assign(:dragging, false)
+       |> assign(:show_help, false)}
     else
       {:ok,
        socket
@@ -59,7 +60,8 @@ defmodule RealtimeChatWeb.ChatLive do
        |> assign(:message, "")
        |> assign(:show_username_modal, false)
        |> assign(:dragging, false)
-       |> assign(:user_positions, [])}
+       |> assign(:user_positions, [])
+       |> assign(:show_help, false)}
     end
   end
 
@@ -191,6 +193,11 @@ defmodule RealtimeChatWeb.ChatLive do
   @impl true
   def handle_event("toggle_username_modal", _, socket) do
     {:noreply, assign(socket, :show_username_modal, !socket.assigns.show_username_modal)}
+  end
+
+  @impl true
+  def handle_event("toggle_help", _, socket) do
+    {:noreply, assign(socket, :show_help, !socket.assigns.show_help)}
   end
 
   @impl true
@@ -328,19 +335,37 @@ defmodule RealtimeChatWeb.ChatLive do
     assigns = assign(assigns, :username_max_length, @username_max_length)
     ~H"""
     <div class="fixed inset-0 flex flex-col bg-gray-100">
-      <div class="flex-none h-16 bg-white shadow-sm px-4 flex items-center justify-between">
+      <div class="flex-none bg-white shadow-sm px-4 flex items-center justify-between" style="height: min-content; padding: 0.5rem;">
         <div class="flex items-center space-x-2">
-          <div class="text-gray-600">Your username:</div>
-          <button class="px-3 py-1 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-full transition-colors duration-200 flex items-center space-x-1"
+          <div class="text-gray-600 text-sm">Username:</div>
+          <button class="px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-full transition-colors duration-200 flex items-center space-x-1 text-sm"
                   phx-click="toggle_username_modal">
             <span class="font-semibold"><%= @username %></span>
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
             </svg>
           </button>
         </div>
-        <div class="text-sm text-gray-500">Click and drag your chat box to move it</div>
+        <button class="text-xs text-gray-500 md:hidden" phx-click="toggle_help">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </button>
+        <div class="text-sm text-gray-500 hidden md:block">Click and drag your chat box to move it</div>
       </div>
+
+      <%= if @show_help do %>
+        <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 md:hidden" phx-click="toggle_help">
+          <div class="bg-white rounded-lg shadow-xl p-4 m-4 max-w-sm">
+            <h3 class="text-lg font-semibold mb-2">How to use</h3>
+            <ul class="space-y-2 text-sm text-gray-600">
+              <li>• Drag your chat box to move it</li>
+              <li>• Pinch to zoom in/out</li>
+              <li>• Tap username to change it</li>
+            </ul>
+          </div>
+        </div>
+      <% end %>
 
       <%= if @show_username_modal do %>
         <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -380,12 +405,12 @@ defmodule RealtimeChatWeb.ChatLive do
         </div>
       <% end %>
 
-      <div class="flex-1 relative overflow-hidden">
+      <div class="flex-1 relative overflow-hidden touch-pan-x touch-pan-y">
         <div class="absolute inset-0 p-4 canvas-container"
              id="chat-canvas"
              phx-hook="ChatCanvas">
           <%= for {position, index} <- Enum.with_index(@user_positions) do %>
-            <div class={"user-chat-box fixed select-none" <> if(position.username == @username, do: " current-user cursor-grab", else: "")}
+            <div class={"user-chat-box fixed select-none touch-pan-x touch-pan-y" <> if(position.username == @username, do: " current-user cursor-grab", else: "")}
                  id={"chat-#{position.user_id}"}
                  style={"transform: translate3d(#{position.x}px, #{position.y}px, 0); opacity: #{UserPosition.get_opacity(position)}; z-index: #{length(@user_positions) - index}"}
                  data-draggable={if position.user_id == @user_id, do: "true", else: "false"}
