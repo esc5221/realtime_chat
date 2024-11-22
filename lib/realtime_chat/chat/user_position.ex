@@ -1,23 +1,49 @@
 defmodule RealtimeChat.Chat.UserPosition do
   use Ecto.Schema
   import Ecto.Changeset
+  import Ecto.Query
 
   schema "user_positions" do
     field :username, :string
     field :x, :integer
     field :y, :integer
     field :messages, {:array, :map}, default: []
-    field :connected, :boolean, default: true
-    field :current_message, :string, default: ""
+    field :connected, :boolean, default: false
+    field :current_message, :string
     field :user_id, :string
+    field :last_active, :utc_datetime
 
     timestamps()
   end
 
+  @doc false
   def changeset(user_position, attrs) do
     user_position
-    |> cast(attrs, [:username, :x, :y, :messages, :connected, :current_message, :user_id])
+    |> cast(attrs, [:username, :x, :y, :messages, :connected, :current_message, :user_id, :last_active])
     |> validate_required([:username, :x, :y, :user_id])
+  end
+
+  def inactive_timeout, do: 5 * 60 # 5 minutes in seconds
+
+  def active?(user_position) do
+    case user_position.last_active do
+      nil -> false
+      last_active ->
+        diff = DateTime.diff(DateTime.utc_now(), last_active)
+        diff < inactive_timeout()
+    end
+  end
+
+  def update_last_active(user_position) do
+    user_position
+    |> changeset(%{last_active: DateTime.utc_now()})
+  end
+
+  def get_active_users(query \\ __MODULE__) do
+    timeout = DateTime.utc_now() |> DateTime.add(-inactive_timeout(), :second)
+    
+    from u in query,
+      where: u.connected == true and u.last_active > ^timeout
   end
 
   def find_optimal_position(existing_positions) do

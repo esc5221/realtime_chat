@@ -9,10 +9,14 @@ defmodule RealtimeChatWeb.ChatLive do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(RealtimeChat.PubSub, "chat")
 
+      # Schedule periodic cleanup
+      if connected?(socket), do: Process.send_after(self(), :cleanup_inactive_users, :timer.seconds(30))
+
       # 기존 사용자 목록 가져오기
       user_positions = 
-        get_connected_users()
-        |> Enum.uniq_by(& &1.user_id)  # 중복 제거
+        UserPosition.get_active_users()
+        |> Repo.all()
+        |> Enum.uniq_by(& &1.user_id)
 
       # 새 사용자의 position 생성 또는 업데이트
       user_position =
@@ -24,12 +28,14 @@ defmodule RealtimeChatWeb.ChatLive do
               x: 600,
               y: 400,
               connected: true,
-              messages: []
+              messages: [],
+              last_active: DateTime.utc_now()
             }
             |> Repo.insert!()
 
           existing ->
             existing
+            |> UserPosition.update_last_active()
             |> Ecto.Changeset.change(connected: true)
             |> Repo.update!()
         end
@@ -163,6 +169,7 @@ defmodule RealtimeChatWeb.ChatLive do
 
     {:ok, updated_position} =
       user_position
+      |> UserPosition.update_last_active()
       |> Ecto.Changeset.change(%{x: x, y: y})
       |> Repo.update()
 
@@ -248,7 +255,7 @@ defmodule RealtimeChatWeb.ChatLive do
 
   @impl true
   def handle_info({:new_message, _username}, socket) do
-    {:noreply, assign(socket, :user_positions, get_connected_users())}
+    {:noreply, assign(socket, :user_positions, UserPosition.get_active_users() |> Repo.all() |> Enum.uniq_by(& &1.user_id))}
   end
 
   @impl true
@@ -271,6 +278,20 @@ defmodule RealtimeChatWeb.ChatLive do
           if pos.user_id == user_id, do: %{pos | x: x, y: y}, else: pos
         end)
       )}
+  end
+
+  @impl true
+  def handle_info(:cleanup_inactive_users, socket) do
+    # Schedule next cleanup
+    if connected?(socket), do: Process.send_after(self(), :cleanup_inactive_users, :timer.seconds(30))
+
+    # Get only active users
+    active_users = 
+      UserPosition.get_active_users()
+      |> Repo.all()
+      |> Enum.uniq_by(& &1.user_id)
+
+    {:noreply, assign(socket, :user_positions, active_users)}
   end
 
   defp get_connected_users do
