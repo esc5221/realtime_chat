@@ -13,7 +13,7 @@ defmodule RealtimeChatWeb.ChatLive do
       if connected?(socket), do: Process.send_after(self(), :cleanup_inactive_users, :timer.seconds(30))
 
       # 기존 사용자 목록 가져오기
-      user_positions = 
+      user_positions =
         UserPosition.get_active_users()
         |> Repo.all()
         |> Enum.uniq_by(& &1.user_id)
@@ -89,7 +89,7 @@ defmodule RealtimeChatWeb.ChatLive do
   @impl true
   def handle_event("typing", %{"value" => message}, socket) when byte_size(message) <= 200 do
     user_position = Repo.get_by!(UserPosition, user_id: socket.assigns.user_id)
-    
+
     user_position
     |> Ecto.Changeset.change(current_message: message)
     |> Repo.update()
@@ -179,7 +179,7 @@ defmodule RealtimeChatWeb.ChatLive do
 
     {:noreply,
       socket
-      |> assign(:user_positions, 
+      |> assign(:user_positions,
         socket.assigns.user_positions
         |> Enum.uniq_by(& &1.user_id)  # 중복 제거
         |> Enum.map(fn pos ->
@@ -201,13 +201,13 @@ defmodule RealtimeChatWeb.ChatLive do
 
     case String.trim(username) do
       "" ->
-        {:noreply, 
-          socket 
+        {:noreply,
+          socket
           |> put_flash(:error, "Username cannot be empty")}
-      
+
       username ->
         # Update the username in user_position
-        {:ok, updated_position} = 
+        {:ok, updated_position} =
           user_position
           |> Ecto.Changeset.change(username: username)
           |> Repo.update()
@@ -230,8 +230,8 @@ defmodule RealtimeChatWeb.ChatLive do
   end
 
   def handle_event("change_username", _params, socket) do
-    {:noreply, 
-      socket 
+    {:noreply,
+      socket
       |> put_flash(:error, "Username is too long (maximum is 20 characters)")}
   end
 
@@ -266,15 +266,15 @@ defmodule RealtimeChatWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:user_typing, user_id, message}, socket) do
+  def handle_info({:user_typing, user_id, current_message}, socket) do
     updated_positions = Enum.map(socket.assigns.user_positions, fn pos ->
       if pos.user_id == user_id do
-        %{pos | current_message: message}
+        %{pos | current_message: current_message}
       else
         pos
       end
     end)
-    
+
     {:noreply, assign(socket, :user_positions, updated_positions)}
   end
 
@@ -289,9 +289,9 @@ defmodule RealtimeChatWeb.ChatLive do
 
   @impl true
   def handle_info({:position_updated, user_id, x, y}, socket) do
-    {:noreply, 
+    {:noreply,
       socket
-      |> assign(:user_positions, 
+      |> assign(:user_positions,
         socket.assigns.user_positions
         |> Enum.uniq_by(& &1.user_id)  # 중복 제거
         |> Enum.map(fn pos ->
@@ -306,7 +306,7 @@ defmodule RealtimeChatWeb.ChatLive do
     if connected?(socket), do: Process.send_after(self(), :cleanup_inactive_users, :timer.seconds(30))
 
     # Get only active users
-    active_users = 
+    active_users =
       UserPosition.get_active_users()
       |> Repo.all()
       |> Enum.uniq_by(& &1.user_id)
@@ -350,7 +350,7 @@ defmodule RealtimeChatWeb.ChatLive do
               <div>
                 <label class="block text-sm font-medium text-gray-700">New Username</label>
                 <div class="relative">
-                  <input type="text" name="username" 
+                  <input type="text" name="username"
                          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
                          value={@username}
                          maxlength={@username_max_length}
@@ -385,7 +385,7 @@ defmodule RealtimeChatWeb.ChatLive do
              id="chat-canvas"
              phx-hook="ChatCanvas">
           <%= for {position, index} <- Enum.with_index(@user_positions) do %>
-            <div class={"user-chat-box fixed select-none" <> if(position.username == @username, do: " current-user cursor-grab", else: "")} 
+            <div class={"user-chat-box fixed select-none" <> if(position.username == @username, do: " current-user cursor-grab", else: "")}
                  id={"chat-#{position.user_id}"}
                  style={"transform: translate3d(#{position.x}px, #{position.y}px, 0); opacity: #{UserPosition.get_opacity(position)}; z-index: #{length(@user_positions) - index}"}
                  data-draggable={if position.user_id == @user_id, do: "true", else: "false"}
