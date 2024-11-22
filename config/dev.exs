@@ -5,6 +5,8 @@ config :realtime_chat, RealtimeChat.Repo,
   database: Path.expand("../realtime_chat_dev.db", Path.dirname(__ENV__.file)),
   pool_size: 5,
   show_sensitive_data_on_connection_error: true,
+  migration_lock: false,
+  cache_size: -2000,
   adapter: Ecto.Adapters.SQLite3
 
 # For development, we disable any cache and enable

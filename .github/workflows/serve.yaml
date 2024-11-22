@@ -1,0 +1,106 @@
+name: realtime-chat-serve
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+
+env:
+  APP_DOMAIN: kiwi-enormous-elephant.ngrok-free.app
+  MIX_ENV: dev
+
+concurrency:
+  group: "realtime-chat-serve"
+  cancel-in-progress: true
+
+jobs:
+  serve:
+    runs-on: ubuntu-latest
+    permissions: write-all
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # Restore encrypted DB if it exists
+      - name: Restore Database
+        run: |
+          if [ -f "realtime_chat_dev.db.enc" ]; then
+            chmod +x scripts/db_crypto.sh
+            ./scripts/db_crypto.sh decrypt realtime_chat_dev.db.enc "${{ secrets.SECRET_KEY_BASE }}"
+          fi
+          touch realtime_chat_dev.db
+          chmod 666 realtime_chat_dev.db
+
+      - name: Create docker-compose.yaml
+        run: |
+          cat << EOF > docker-compose.yaml
+          services:
+            web:
+              build: .
+              ports:
+                - "4000:4000"
+              volumes:
+                - ./realtime_chat_dev.db:/app/realtime_chat_dev.db
+              environment:
+                APP_DOMAIN: ${{ env.APP_DOMAIN }}
+                MIX_ENV: ${{ env.MIX_ENV }}
+                SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+              init: true
+          EOF
+
+      - name: Run server with docker-compose
+        run: docker compose up -d
+
+      - name: Start Ngrok Tunnel
+        uses: esc5221/ngrok-tunnel-action@v1.0.2
+        with:
+          timeout: 6h
+          port: "4000 --domain=${{ env.APP_DOMAIN }}"
+          ngrok_authtoken: ${{ secrets.NGROK_AUTHTOKEN }}
+          tunnel_type: http
+          save_url_to_filename: tunnel_url.md
+
+      - name: Monitor Domain and Restart on Error
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}          
+        run: |
+          while true; do
+            HTTP_STATUS=$(curl -o /dev/null -s -w "%{http_code}" https://${{ env.APP_DOMAIN }})
+            if [ "$HTTP_STATUS" -ne 200 ]; then
+              echo "Error detected with status code $HTTP_STATUS. Restarting workflow..."
+              exit 1
+            else
+              echo "Domain is healthy with status code $HTTP_STATUS."
+            fi
+            sleep 60
+          done &
+
+      - name: Tail logs
+        run: timeout 4h docker compose logs -f
+
+      # Save and encrypt DB before workflow ends
+      - name: Save Database
+        if: always()
+        run: |
+          docker compose down
+          chmod +x scripts/db_crypto.sh
+          ./scripts/db_crypto.sh encrypt realtime_chat_dev.db "${{ secrets.SECRET_KEY_BASE }}"
+          
+      - name: Commit and Push DB
+        if: always()
+        run: |
+          git config --global user.name 'GitHub Action'
+          git config --global user.email 'action@github.com'
+          git add realtime_chat_dev.db.enc
+          git commit -m "Update encrypted database [skip ci]" || echo "No changes to commit"
+          git push
+
+      - name: Dispatch next workflow run
+        if: failure()
+        uses: benc-uk/workflow-dispatch@v1.2.3
+        with:
+          workflow: realtime-chat-serve
+          token: ${{ secrets.GITHUB_TOKEN }}
