@@ -87,19 +87,20 @@ defmodule RealtimeChatWeb.ChatLive do
   end
 
   @impl true
-  def handle_event("typing", %{"value" => message}, socket) do
-    username = socket.assigns.username
+  def handle_event("typing", %{"value" => message}, socket) when byte_size(message) <= @message_max_length do
     user_position = Repo.get_by!(UserPosition, user_id: socket.assigns.user_id)
-
-    # 현재 메시지 업데이트 (임시)
+    
     user_position
     |> Ecto.Changeset.change(current_message: message)
-    |> Repo.update!()
+    |> Repo.update()
 
-    # 브로드캐스트
-    Phoenix.PubSub.broadcast(RealtimeChat.PubSub, "chat", {:typing, username, message})
+    Phoenix.PubSub.broadcast(RealtimeChat.PubSub, "chat", {:user_typing, socket.assigns.user_id, message})
 
     {:noreply, assign(socket, :message, message)}
+  end
+
+  def handle_event("typing", _params, socket) do
+    {:noreply, socket}
   end
 
   @impl true
@@ -299,8 +300,11 @@ defmodule RealtimeChatWeb.ChatLive do
     |> Repo.all()
   end
 
+  @message_max_length 200
+
   @impl true
   def render(assigns) do
+    assigns = assign(assigns, :message_max_length, @message_max_length)
     ~H"""
     <div class="fixed inset-0 flex flex-col bg-gray-100">
       <div class="flex-none h-16 bg-white shadow-sm px-4 flex items-center justify-between">
@@ -352,21 +356,21 @@ defmodule RealtimeChatWeb.ChatLive do
         <div class="absolute inset-0 p-4 canvas-container"
              id="chat-canvas"
              phx-hook="ChatCanvas">
-          <%= for position <- @user_positions do %>
+          <%= for {position, index} <- Enum.with_index(@user_positions) do %>
             <div class={"user-chat-box fixed select-none" <> if(position.username == @username, do: " current-user cursor-grab", else: "")} 
                  id={"chat-#{position.user_id}"}
-                 style={"transform: translate3d(#{position.x}px, #{position.y}px, 0); opacity: #{UserPosition.get_opacity(position)}"}
+                 style={"transform: translate3d(#{position.x}px, #{position.y}px, 0); opacity: #{UserPosition.get_opacity(position)}; z-index: #{length(@user_positions) - index}"}
                  data-draggable={if position.user_id == @user_id, do: "true", else: "false"}
                  phx-hook="Draggable">
               <div class="bg-white rounded-lg shadow-lg p-4 w-48">
                 <div class="font-bold text-gray-700 mb-2"><%= position.username %></div>
-                <div class="current-message text-gray-600 min-h-[1.5rem]">
+                <div class="current-message text-gray-600 min-h-[1.5rem] max-h-[4.5rem] overflow-y-auto break-words">
                   <%= position.current_message %>
                 </div>
                 <%= if position.messages != [] do %>
-                  <div class="message-history hidden absolute bottom-full left-0 w-full bg-white rounded-lg shadow-lg p-2 mb-2">
-                    <%= for message <- Enum.take(position.messages, 5) do %>
-                      <div class="text-sm text-gray-600 mb-1">
+                  <div class="message-history hidden absolute bottom-full left-0 w-full bg-white rounded-lg shadow-lg p-2 mb-2 max-h-[10rem] overflow-y-auto">
+                    <%= for message <- Enum.take(position.messages, 10) do %>
+                      <div class="text-sm text-gray-600 mb-1 break-words">
                         <%= message["content"] %>
                       </div>
                     <% end %>
@@ -379,14 +383,18 @@ defmodule RealtimeChatWeb.ChatLive do
       </div>
 
       <div class="flex-none h-24 bg-white shadow-lg px-4 flex items-center justify-center">
-        <div class="w-full max-w-2xl">
+        <div class="w-full max-w-2xl relative">
           <input type="text"
                  value={@message}
                  phx-keyup="typing"
                  phx-keydown="keydown"
+                 maxlength={@message_max_length}
                  class="w-full rounded-lg border border-gray-300 px-4 py-2"
                  placeholder="Type your message..."
                  autocomplete="off"/>
+          <div class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">
+            <%= String.length(@message) %>/<%= @message_max_length %>
+          </div>
         </div>
       </div>
     </div>
