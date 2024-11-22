@@ -163,23 +163,30 @@ defmodule RealtimeChatWeb.ChatLive do
   @impl true
   def handle_event("change_username", %{"username" => new_username}, socket) do
     user_id = socket.assigns.user_id
+    old_username = socket.assigns.username
     user_position = Repo.get_by!(UserPosition, user_id: user_id)
 
     case Repo.get_by(UserPosition, username: new_username) do
       nil ->
         # Update the username in user_position
-        user_position
-        |> Ecto.Changeset.change(username: new_username)
-        |> Repo.update!()
+        {:ok, updated_position} =
+          user_position
+          |> Ecto.Changeset.change(username: new_username)
+          |> Repo.update()
 
-        # Broadcast the change
-        Phoenix.PubSub.broadcast(RealtimeChat.PubSub, "chat", {:username_changed, user_position.username, new_username})
+        # Update local state first
+        socket =
+          socket
+          |> assign(:username, new_username)
+          |> assign(:show_username_modal, false)
+          |> assign(:user_positions, Enum.map(socket.assigns.user_positions, fn pos ->
+            if pos.user_id == user_id, do: updated_position, else: pos
+          end))
 
-        {:noreply,
-         socket
-         |> push_navigate(to: "/", replace: true)
-         |> assign(:username, new_username)
-         |> assign(:show_username_modal, false)}
+        # Broadcast the change to other clients
+        Phoenix.PubSub.broadcast(RealtimeChat.PubSub, "chat", {:username_changed, old_username, new_username})
+
+        {:noreply, socket}
 
       _ ->
         {:noreply,
@@ -187,6 +194,20 @@ defmodule RealtimeChatWeb.ChatLive do
          |> put_flash(:error, "Username already taken")
          |> assign(:show_username_modal, true)}
     end
+  end
+
+  @impl true
+  def handle_info({:username_changed, old_username, new_username}, socket) do
+    # Update user_positions list with new username
+    updated_positions = Enum.map(socket.assigns.user_positions, fn pos ->
+      if pos.username == old_username do
+        %{pos | username: new_username}
+      else
+        pos
+      end
+    end)
+
+    {:noreply, assign(socket, :user_positions, updated_positions)}
   end
 
   @impl true
