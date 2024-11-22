@@ -5,9 +5,7 @@ defmodule RealtimeChatWeb.ChatLive do
   import Ecto.Query, except: [update: 2, update: 3]
 
   @impl true
-  def mount(_params, session, socket) do
-    username = session["username"]
-
+  def mount(_params, %{"username" => username}, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(RealtimeChat.PubSub, "chat")
 
@@ -36,8 +34,9 @@ defmodule RealtimeChatWeb.ChatLive do
     socket = socket
              |> assign(:username, username)
              |> assign(:message, "")
-             |> assign(:user_positions, get_connected_users())
              |> assign(:dragging, false)
+             |> assign(:show_username_modal, false)
+             |> assign(:user_positions, get_connected_users())
 
     {:ok, socket}
   end
@@ -156,6 +155,40 @@ defmodule RealtimeChatWeb.ChatLive do
   end
 
   @impl true
+  def handle_event("toggle_username_modal", _, socket) do
+    {:noreply, assign(socket, :show_username_modal, !socket.assigns.show_username_modal)}
+  end
+
+  @impl true
+  def handle_event("change_username", %{"username" => new_username}, socket) do
+    old_username = socket.assigns.username
+    user_position = Repo.get_by!(UserPosition, username: old_username)
+
+    case Repo.get_by(UserPosition, username: new_username) do
+      nil ->
+        # Update the username in user_position
+        user_position
+        |> Ecto.Changeset.change(username: new_username)
+        |> Repo.update!()
+
+        # Broadcast the change
+        Phoenix.PubSub.broadcast(RealtimeChat.PubSub, "chat", {:username_changed, old_username, new_username})
+
+        {:noreply,
+         socket
+         |> push_navigate(to: "/", replace: true)
+         |> assign(:username, new_username)
+         |> assign(:show_username_modal, false)}
+
+      _ ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Username already taken")
+         |> assign(:show_username_modal, true)}
+    end
+  end
+
+  @impl true
   def handle_info({:user_joined, user_position}, socket) do
     {:noreply, Phoenix.Component.update(socket, :user_positions, &[user_position | &1])}
   end
@@ -192,10 +225,51 @@ defmodule RealtimeChatWeb.ChatLive do
   def render(assigns) do
     ~H"""
     <div class="fixed inset-0 flex flex-col bg-gray-100">
-      <div class="flex-none h-16 bg-white shadow-sm px-4 flex items-center">
-        <p class="text-gray-600">Your username: <%= @username %></p>
+      <div class="flex-none h-16 bg-white shadow-sm px-4 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <div class="text-gray-600">Your username:</div>
+          <button class="px-3 py-1 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-full transition-colors duration-200 flex items-center space-x-1"
+                  phx-click="toggle_username_modal">
+            <span class="font-semibold"><%= @username %></span>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+          </button>
+        </div>
+        <div class="text-sm text-gray-500">Click and drag your chat box to move it</div>
       </div>
-      
+
+      <%= if @show_username_modal do %>
+        <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div class="bg-white rounded-lg shadow-xl p-6 w-96">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Change Username</h3>
+            <form phx-submit="change_username" class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700">New Username</label>
+                <input type="text" name="username" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                       value={@username}
+                       required
+                       autocomplete="off"/>
+              </div>
+              <%= if Phoenix.Flash.get(@flash, :error) do %>
+                <p class="text-sm text-red-600"><%= Phoenix.Flash.get(@flash, :error) %></p>
+              <% end %>
+              <div class="flex justify-end space-x-3">
+                <button type="button"
+                        class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+                        phx-click="toggle_username_modal">
+                  Cancel
+                </button>
+                <button type="submit"
+                        class="px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-md">
+                  Save
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      <% end %>
+
       <div class="flex-1 relative overflow-hidden">
         <div class="absolute inset-0 p-4" 
              id="chat-canvas"
