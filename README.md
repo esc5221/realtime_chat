@@ -6,7 +6,7 @@
 https://kiwi-enormous-elephant.ngrok-free.app/
 
 ## 기능
-- 실시간 메시지 전송 및 수신,
+- 실시간 메시지 전송 및 수신, 컴포넌트 위치 동기화
 - 다중 사용자 지원
 - WebSocket 기반 실시간 통신
 - LiveView를 활용한 반응형 UI
